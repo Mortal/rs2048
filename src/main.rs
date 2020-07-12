@@ -166,7 +166,7 @@ fn tree_search<F: FnMut(usize, Board) -> f64>(
 }
 
 fn board_value(board: Board) -> f64 {
-    let [a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p] = board.tiles();
+    let [a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p] = board.tiles().as_array();
 
     fn order(a: u8, b: u8, c: u8, d: u8) -> isize {
         [a.cmp(&b), b.cmp(&c), c.cmp(&d)]
@@ -180,7 +180,7 @@ fn board_value(board: Board) -> f64 {
     }
 
     let mut hist = [0; 13];
-    for &v in board.tiles().iter() {
+    for v in board.tiles().iter() {
         if (v as usize) < hist.len() {
             hist[v as usize] += 1;
         }
@@ -245,7 +245,7 @@ fn play<F: FnMut(usize, Board) -> f64>(f: &mut F) {
 fn slot(b: Board) -> usize {
     b.tiles()
         .iter()
-        .map(|v| if *v == 0 { 0 } else { 1 << (v - 1) })
+        .map(|v| if v == 0 { 0 } else { 1 << (v - 1) })
         .sum()
 }
 
@@ -287,7 +287,7 @@ fn main() {
                         std::collections::HashMap::new()
                     })
                 })
-                .entry(b.tiles())
+                .entry(b.tiles().as_array())
                 .or_insert_with(|| {
                     stat_writes += 1;
                     tree_search_dfs(
