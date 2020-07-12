@@ -133,11 +133,11 @@ impl TreeSearchNode {
     }
 }
 
-fn tree_search<F: Fn(usize, Board) -> f64>(
+fn tree_search<F: FnMut(usize, Board) -> f64>(
     b: Board,
     max_count: usize,
     min_weight: f64,
-    f: &F,
+    f: &mut F,
 ) -> f64 {
     let mut s = TreeSearchNode::new(b);
     let log_min_weight = min_weight.ln();
@@ -168,7 +168,7 @@ fn tree_search<F: Fn(usize, Board) -> f64>(
 fn board_value(board: Board) -> f64 {
     let [a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p] = board.tiles();
 
-    fn v(a: u8, b: u8, c: u8, d: u8) -> isize {
+    fn order(a: u8, b: u8, c: u8, d: u8) -> isize {
         [a.cmp(&b), b.cmp(&c), c.cmp(&d)]
             .iter()
             .map(|v| match v {
@@ -178,15 +178,27 @@ fn board_value(board: Board) -> f64 {
             })
             .sum()
     }
-    1000.0
-        + board.tiles().iter().filter(|v| **v == 0).count() as f64
-        + ((v(a, b, c, d) + v(e, f, g, h) + v(i, j, k, l) + v(m, n, o, p)).abs()
-            + (v(a, e, i, m) + v(b, f, j, n) + v(c, g, k, o) + v(d, h, l, p)).abs())
+
+    let mut hist = [0; 13];
+    for &v in board.tiles().iter() {
+        if (v as usize) < hist.len() {
+            hist[v as usize] += 1;
+        }
+    }
+    let multi_penalty: usize = hist[3..]
+        .iter()
+        .map(|&v| if v > 1 { v - 1 } else { 0 })
+        .sum();
+
+    1000.0 - multi_penalty as f64
+        + hist[0] as f64
+        + ((order(a, b, c, d) + order(e, f, g, h) + order(i, j, k, l) + order(m, n, o, p)).abs()
+            + (order(a, e, i, m) + order(b, f, j, n) + order(c, g, k, o) + order(d, h, l, p)).abs())
             as f64
     //2.0f64.powi(*b.tiles().iter().max().unwrap() as i32)
 }
 
-fn play<F: FnMut(Board) -> f64>(f: &mut F) {
+fn play<F: FnMut(usize, Board) -> f64>(f: &mut F) {
     let mut rng = rand::thread_rng();
     let mut board = Board::new()
         .iter_growth()
@@ -213,8 +225,8 @@ fn play<F: FnMut(Board) -> f64>(f: &mut F) {
         };
         let mut best_value = None;
         for m in it {
-            let w = best_value.get_or_insert_with(|| f(best));
-            let v = f(m);
+            let w = best_value.get_or_insert_with(|| f(i, best));
+            let v = f(i, m);
             if v > *w {
                 best = m;
                 best_value = Some(v);
@@ -230,22 +242,68 @@ fn play<F: FnMut(Board) -> f64>(f: &mut F) {
     }
 }
 
+fn slot(b: Board) -> usize {
+    b.tiles()
+        .iter()
+        .map(|v| if *v == 0 { 0 } else { 1 << (v - 1) })
+        .sum()
+}
+
 fn main() {
-    play(&mut |b| {
-        tree_search(b, 10000, 0.1, &|c, b| {
-            tree_search_dfs(
-                b,
-                if c < 50 {
-                    4
-                } else if c < 1000 {
-                    2
-                } else if c < 10000 {
-                    1
-                } else {
-                    0
-                },
-                &board_value,
-            )
+    let mut cache: Vec<Option<std::collections::HashMap<_, _, _>>> = vec![];
+    let mut free = vec![];
+    let mut stat_writes = 0;
+    let mut stat_reads = 0;
+    let mut stat_cleared = 0;
+    let mut stat_maps = 0;
+    play(&mut |round, b| {
+        if round > 0 {
+            if let Some(mut h) = cache[round - 1].take() {
+                println!(
+                    "Round {}: Hits={} Misses={} Size={} Cleared={} Maps={}",
+                    round,
+                    stat_reads - stat_writes,
+                    stat_writes,
+                    stat_writes - stat_cleared,
+                    stat_cleared,
+                    stat_maps
+                );
+                stat_cleared += h.len();
+                h.clear();
+                free.push(h);
+            }
+        }
+        assert!(slot(b) >= round);
+        tree_search(b, 10000, 0.1, &mut |c, b| {
+            let s = slot(b);
+            while cache.len() <= s {
+                cache.push(None);
+            }
+            stat_reads += 1;
+            *cache[s]
+                .get_or_insert_with(|| {
+                    free.pop().unwrap_or_else(|| {
+                        stat_maps += 1;
+                        std::collections::HashMap::new()
+                    })
+                })
+                .entry(b.tiles())
+                .or_insert_with(|| {
+                    stat_writes += 1;
+                    tree_search_dfs(
+                        b,
+                        if c < 50 {
+                            4
+                        } else if c < 1000 {
+                            2
+                        } else if c < 10000 {
+                            1
+                        } else {
+                            0
+                        },
+                        &board_value,
+                    )
+                })
         })
     });
 }
