@@ -2,9 +2,9 @@ use rand::seq::IteratorRandom;
 use rand::Rng;
 
 mod board;
-use crate::board::Board;
+use crate::board::{Board, BoardTable};
 
-fn tree_search_dfs<F: Fn(Board) -> f64>(b: Board, depth: usize, f: &F) -> f64 {
+fn tree_search_dfs<F: Fn(Board) -> f64>(b: Board, depth: usize, f: &F, t: &BoardTable) -> f64 {
     if depth == 0 {
         return f(b);
     }
@@ -13,8 +13,8 @@ fn tree_search_dfs<F: Fn(Board) -> f64>(b: Board, depth: usize, f: &F) -> f64 {
     for ms in b.iter_growth() {
         for (w, m) in [(9.0, ms.set(1)), (1.0, ms.set(2))].iter() {
             let mut b = 0f64;
-            for s in m.iter_moves() {
-                b = b.max(tree_search_dfs(s, depth - 1, f));
+            for s in m.iter_moves_table(t) {
+                b = b.max(tree_search_dfs(s, depth - 1, f, t));
             }
             s += w * b;
             n += w;
@@ -89,7 +89,7 @@ impl TreeSearchNode {
         }
     }
 
-    fn expand(&mut self) {
+    fn expand(&mut self, t: &BoardTable) {
         assert!(self.children.is_none());
         let mut children = vec![];
         let growth = self.board.iter_growth().collect::<Vec<_>>();
@@ -97,7 +97,7 @@ impl TreeSearchNode {
         for ms in growth {
             for (w, m) in [(0.9f64.ln(), ms.set(1)), (0.1f64.ln(), ms.set(2))].iter() {
                 let mut c = vec![];
-                for s in m.iter_moves() {
+                for s in m.iter_moves_table(t) {
                     c.push(TreeSearchNode {
                         board: s,
                         children: None,
@@ -137,6 +137,7 @@ fn tree_search<F: FnMut(usize, Board) -> f64>(
     b: Board,
     max_count: usize,
     min_weight: f64,
+    t: &BoardTable,
     f: &mut F,
 ) -> f64 {
     let mut s = TreeSearchNode::new(b);
@@ -148,7 +149,7 @@ fn tree_search<F: FnMut(usize, Board) -> f64>(
         }
         if let Some(x) = n {
             // println!("Found a heavy leaf after looking at {} leaves", c);
-            x.expand();
+            x.expand(t);
         } else {
             break c;
         }
@@ -198,7 +199,7 @@ fn board_value(board: Board) -> f64 {
     //2.0f64.powi(*b.tiles().iter().max().unwrap() as i32)
 }
 
-fn play<F: FnMut(usize, Board) -> f64>(f: &mut F) {
+fn play<F: FnMut(usize, Board) -> f64>(t: &BoardTable, f: &mut F) {
     let mut rng = rand::thread_rng();
     let mut board = Board::new()
         .iter_growth()
@@ -215,7 +216,7 @@ fn play<F: FnMut(usize, Board) -> f64>(f: &mut F) {
             known_value.unwrap_or(-1.0),
             board
         );
-        let mut it = board.iter_moves();
+        let mut it = board.iter_moves_table(t);
         let mut best = match it.next() {
             None => {
                 println!("No moves!");
@@ -256,7 +257,8 @@ fn main() {
     let mut stat_reads = 0;
     let mut stat_cleared = 0;
     let mut stat_maps = 0;
-    play(&mut |round, b| {
+    let t = BoardTable::new();
+    play(&t, &mut |round, b| {
         if round > 0 {
             if let Some(mut h) = cache[round - 1].take() {
                 println!(
@@ -274,7 +276,7 @@ fn main() {
             }
         }
         assert!(slot(b) >= round);
-        tree_search(b, 10000, 0.1, &mut |c, b| {
+        tree_search(b, 10000, 0.1, &t, &mut |c, b| {
             let s = slot(b);
             while cache.len() <= s {
                 cache.push(None);
@@ -302,6 +304,7 @@ fn main() {
                             0
                         },
                         &board_value,
+                        &t,
                     )
                 })
         })

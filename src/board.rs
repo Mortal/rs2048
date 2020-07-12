@@ -1,7 +1,122 @@
-#[derive(Debug, Clone, Copy, PartialEq, Hash)]
+#[derive(Clone, Copy, PartialEq, Hash)]
 pub struct Board {
     board: u64,
     // tiles: [u8; 16],
+}
+
+impl Board {
+    pub fn transpose(&self) -> Board {
+        // https://github.com/nneonneo/2048-ai
+        let x = self.board;
+        let a1 = x & 0xF0F00F0FF0F00F0F;
+        let a2 = x & 0x0000F0F00000F0F0;
+        let a3 = x & 0x0F0F00000F0F0000;
+        let a = a1 | (a2 << 12) | (a3 >> 12);
+        let b1 = a & 0xFF00FF0000FF00FF;
+        let b2 = a & 0x00FF00FF00000000;
+        let b3 = a & 0x00000000FF00FF00;
+        Board { board: b1 | (b2 >> 24) | (b3 << 24) }
+    }
+
+    pub fn count_empty(&self) -> usize {
+        // https://github.com/nneonneo/2048-ai
+        let mut x = self.board;
+        if x == 0 { return 16; }
+        x |= (x >> 2) & 0x3333333333333333;
+        x |= x >> 1;
+        x = !x & 0x1111111111111111;
+        // At this point each nibble is:
+        //  0 if the original nibble was non-zero
+        //  1 if the original nibble was zero
+        // Next sum them all
+        x += x >> 32;
+        x += x >> 16;
+        x += x >> 8;
+        x += x >> 4;
+        // Since the board is non-empty, the answer is at most 15,
+        // so overflow is not a problem.
+        (x & 0xf) as usize
+    }
+}
+
+fn row_to_col(row: u16) -> u64 {
+    let row = row as u64;
+    (row | (row << 12) | (row << 24) | (row << 36)) & 0x000F000F000F000F
+}
+
+fn reverse_row(row: u16) -> u16 {
+    (row >> 12) | ((row >> 4) & 0x00F0) | ((row << 4) & 0x0F00) | (row << 12)
+}
+
+pub struct BoardTable {
+    gravity1: [u16; 0x10000],
+    gravity2: [u16; 0x10000],
+    gravity3: [u64; 0x10000],
+    gravity4: [u64; 0x10000],
+}
+
+impl BoardTable {
+    pub fn new() -> Self {
+        let mut g1 = [0; 0x10000];
+        let mut g2 = [0; 0x10000];
+        let mut g3 = [0; 0x10000];
+        let mut g4 = [0; 0x10000];
+        for idx in 0..0x10000usize {
+            let row = idx as u16;
+            let a = (row & 0xF) as u8;
+            let b = ((row >> 4) & 0xF) as u8;
+            let c = ((row >> 8) & 0xF) as u8;
+            let d = (row >> 12) as u8;
+            let (a, b, c, d) = gravity4(a, b, c, d);
+            let result = (a as u16) | ((b as u16) << 4) | ((c as u16) << 8) | ((d as u16) << 12);
+            let rev_result = reverse_row(result);
+            let rev_row = reverse_row(row);
+            let rev_idx = rev_row as usize;
+            g1[idx] = row ^ result;
+            g2[rev_idx] = rev_row ^ rev_result;
+            g3[idx] = row_to_col(row) ^ row_to_col(result);
+            g4[rev_idx] = row_to_col(rev_row) ^ row_to_col(rev_result);
+        }
+        Self { gravity1: g1, gravity2: g2, gravity3: g3, gravity4: g4 }
+    }
+
+    fn gravity1(&self, board: Board) -> Board {
+        let mut x = board.board;
+        x ^= (self.gravity1[((x >> (0 * 16)) & 0xFFFF) as usize] as u64) << (0 * 16);
+        x ^= (self.gravity1[((x >> (1 * 16)) & 0xFFFF) as usize] as u64) << (1 * 16);
+        x ^= (self.gravity1[((x >> (2 * 16)) & 0xFFFF) as usize] as u64) << (2 * 16);
+        x ^= (self.gravity1[((x >> (3 * 16)) & 0xFFFF) as usize] as u64) << (3 * 16);
+        Board { board: x }
+    }
+
+    fn gravity2(&self, board: Board) -> Board {
+        let mut x = board.board;
+        x ^= (self.gravity2[((x >> (0 * 16)) & 0xFFFF) as usize] as u64) << (0 * 16);
+        x ^= (self.gravity2[((x >> (1 * 16)) & 0xFFFF) as usize] as u64) << (1 * 16);
+        x ^= (self.gravity2[((x >> (2 * 16)) & 0xFFFF) as usize] as u64) << (2 * 16);
+        x ^= (self.gravity2[((x >> (3 * 16)) & 0xFFFF) as usize] as u64) << (3 * 16);
+        Board { board: x }
+    }
+
+    fn gravity3(&self, board: Board) -> Board {
+        let mut x = board.board;
+        let t = board.transpose().board;
+        x ^= self.gravity3[((t >> (0 * 16)) & 0xFFFF) as usize] << (0 * 4);
+        x ^= self.gravity3[((t >> (1 * 16)) & 0xFFFF) as usize] << (1 * 4);
+        x ^= self.gravity3[((t >> (2 * 16)) & 0xFFFF) as usize] << (2 * 4);
+        x ^= self.gravity3[((t >> (3 * 16)) & 0xFFFF) as usize] << (3 * 4);
+        Board { board: x }
+    }
+
+    fn gravity4(&self, board: Board) -> Board {
+        let mut x = board.board;
+        let t = board.transpose().board;
+        x ^= self.gravity4[((t >> (0 * 16)) & 0xFFFF) as usize] << (0 * 4);
+        x ^= self.gravity4[((t >> (1 * 16)) & 0xFFFF) as usize] << (1 * 4);
+        x ^= self.gravity4[((t >> (2 * 16)) & 0xFFFF) as usize] << (2 * 4);
+        x ^= self.gravity4[((t >> (3 * 16)) & 0xFFFF) as usize] << (3 * 4);
+        Board { board: x }
+    }
 }
 
 fn gravity2(a: u8, b: u8) -> (u8, u8) {
@@ -127,6 +242,11 @@ impl Board {
         BoardMoves { board: self, i: 0 }
     }
 
+    pub fn iter_moves_table(self, t: &BoardTable) -> BoardMovesTable {
+        // assert_eq!(BoardMovesTable { board: self, i: 0, t }.collect::<Vec<_>>(), self.iter_moves().collect::<Vec<_>>());
+        BoardMovesTable { board: self, i: 0, t }
+    }
+
     pub fn iter_growth(&self) -> impl Iterator<Item=BoardGrowth> + '_ {
         self.tiles().iter().enumerate().filter_map(move |(i, v)| if v != 0 { None } else { Some(BoardGrowth{ board: *self, i: i as u8 }) })
     }
@@ -217,6 +337,48 @@ impl Iterator for BoardMoves {
     }
 }
 
+pub struct BoardMovesTable<'a> {
+    board: Board,
+    i: u8,
+    t: &'a BoardTable,
+}
+
+impl<'a> Iterator for BoardMovesTable<'a> {
+    type Item = Board;
+
+    fn next(&mut self) -> Option<Board> {
+        if self.i == 0 {
+            self.i += 1;
+            let b = self.t.gravity1(self.board);
+            if self.board != b {
+                return Some(b);
+            }
+        }
+        if self.i == 1 {
+            self.i += 1;
+            let b = self.t.gravity2(self.board);
+            if self.board != b {
+                return Some(b);
+            }
+        }
+        if self.i == 2 {
+            self.i += 1;
+            let b = self.t.gravity3(self.board);
+            if self.board != b {
+                return Some(b);
+            }
+        }
+        if self.i == 3 {
+            self.i += 1;
+            let b = self.t.gravity4(self.board);
+            if self.board != b {
+                return Some(b);
+            }
+        }
+        None
+    }
+}
+
 pub struct BoardGrowth {
     board: Board,
     i: u8,
@@ -243,5 +405,11 @@ impl std::fmt::Display for Board {
             }
         }
         Ok(())
+    }
+}
+
+impl std::fmt::Debug for Board {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(fmt, "Board::from_array({:?})", self.tiles().as_array())
     }
 }
