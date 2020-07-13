@@ -13,7 +13,7 @@ fn tree_search_dfs<F: Fn(Board) -> f64>(b: Board, depth: usize, f: &F, t: &Board
     for ms in b.iter_growth() {
         for (w, m) in [(9.0, ms.set(1)), (1.0, ms.set(2))].iter() {
             let mut b = 0f64;
-            for s in m.iter_moves_table(t) {
+            for s in m.iter_moves(t) {
                 b = b.max(tree_search_dfs(s, depth - 1, f, t));
             }
             s += w * b;
@@ -37,36 +37,6 @@ impl TreeSearchNode {
         TreeSearchNode {
             board,
             children: None,
-        }
-    }
-
-    fn max_weight_leaf(&mut self) -> Option<(f64, &mut TreeSearchNode)> {
-        match self.children {
-            None => Some((0.0, self)),
-            Some(ref mut children) => children
-                .iter_mut()
-                .filter_map(|(w, v)| {
-                    match v
-                        .iter_mut()
-                        .filter_map(|n| n.max_weight_leaf())
-                        .max_by(|a, b| {
-                            if a.0 < b.0 {
-                                std::cmp::Ordering::Less
-                            } else {
-                                std::cmp::Ordering::Greater
-                            }
-                        }) {
-                        None => None,
-                        Some((a, b)) => Some((*w + a, b)),
-                    }
-                })
-                .max_by(|a, b| {
-                    if a.0 < b.0 {
-                        std::cmp::Ordering::Less
-                    } else {
-                        std::cmp::Ordering::Greater
-                    }
-                }),
         }
     }
 
@@ -97,7 +67,7 @@ impl TreeSearchNode {
         for ms in growth {
             for (w, m) in [(0.9f64.ln(), ms.set(1)), (0.1f64.ln(), ms.set(2))].iter() {
                 let mut c = vec![];
-                for s in m.iter_moves_table(t) {
+                for s in m.iter_moves(t) {
                     c.push(TreeSearchNode {
                         board: s,
                         children: None,
@@ -216,7 +186,7 @@ fn play<F: FnMut(usize, Board) -> f64>(t: &BoardTable, f: &mut F) {
             known_value.unwrap_or(-1.0),
             board
         );
-        let mut it = board.iter_moves_table(t);
+        let mut it = board.iter_moves(t);
         let mut best = match it.next() {
             None => {
                 println!("No moves!");

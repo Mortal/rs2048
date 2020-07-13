@@ -1,7 +1,6 @@
 #[derive(Clone, Copy, PartialEq, Hash)]
 pub struct Board {
-    board: u64,
-    // tiles: [u8; 16],
+    pub board: u64,
 }
 
 impl Board {
@@ -15,13 +14,17 @@ impl Board {
         let b1 = a & 0xFF00FF0000FF00FF;
         let b2 = a & 0x00FF00FF00000000;
         let b3 = a & 0x00000000FF00FF00;
-        Board { board: b1 | (b2 >> 24) | (b3 << 24) }
+        Board {
+            board: b1 | (b2 >> 24) | (b3 << 24),
+        }
     }
 
     pub fn count_empty(&self) -> usize {
         // https://github.com/nneonneo/2048-ai
         let mut x = self.board;
-        if x == 0 { return 16; }
+        if x == 0 {
+            return 16;
+        }
         x |= (x >> 2) & 0x3333333333333333;
         x |= x >> 1;
         x = !x & 0x1111111111111111;
@@ -77,7 +80,12 @@ impl BoardTable {
             g3[idx] = row_to_col(row) ^ row_to_col(result);
             g4[rev_idx] = row_to_col(rev_row) ^ row_to_col(rev_result);
         }
-        Self { gravity1: g1, gravity2: g2, gravity3: g3, gravity4: g4 }
+        Self {
+            gravity1: g1,
+            gravity2: g2,
+            gravity3: g3,
+            gravity4: g4,
+        }
     }
 
     fn gravity1(&self, board: Board) -> Board {
@@ -162,12 +170,9 @@ fn gravity4(a: u8, b: u8, c: u8, d: u8) -> (u8, u8, u8, u8) {
 
 pub struct BoardTiles(u64);
 
-#[derive(Clone, Copy)]
-pub struct BoardTilesIterator(u64, usize);
-
 impl BoardTiles {
-    pub fn iter(&self) -> BoardTilesIterator {
-        BoardTilesIterator(self.0, 0)
+    pub fn iter(self) -> impl Iterator<Item = u8> {
+        (0..16).map(move |i| (self.0 >> (4 * i)) as u8 & 0xf)
     }
 
     pub fn as_array(&self) -> [u8; 16] {
@@ -193,44 +198,29 @@ impl BoardTiles {
     }
 }
 
-impl Iterator for BoardTilesIterator {
-    type Item = u8;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.1 < 16 {
-            let v = (self.0 & 0xf) as u8;
-            self.0 >>= 4;
-            self.1 += 1;
-            Some(v)
-        } else {
-            None
-        }
-    }
-}
-
 impl Board {
     pub fn new() -> Self {
         Self { board: 0 }
     }
 
     pub fn from_array(tiles: [u8; 16]) -> Self {
-        Self { board:
-            (tiles[0] as u64) << (0 * 4) |
-            (tiles[1] as u64) << (1 * 4) |
-            (tiles[2] as u64) << (2 * 4) |
-            (tiles[3] as u64) << (3 * 4) |
-            (tiles[4] as u64) << (4 * 4) |
-            (tiles[5] as u64) << (5 * 4) |
-            (tiles[6] as u64) << (6 * 4) |
-            (tiles[7] as u64) << (7 * 4) |
-            (tiles[8] as u64) << (8 * 4) |
-            (tiles[9] as u64) << (9 * 4) |
-            (tiles[10] as u64) << (10 * 4) |
-            (tiles[11] as u64) << (11 * 4) |
-            (tiles[12] as u64) << (12 * 4) |
-            (tiles[13] as u64) << (13 * 4) |
-            (tiles[14] as u64) << (14 * 4) |
-            (tiles[15] as u64) << (15 * 4)
+        Self {
+            board: (tiles[0] as u64) << (0 * 4)
+                | (tiles[1] as u64) << (1 * 4)
+                | (tiles[2] as u64) << (2 * 4)
+                | (tiles[3] as u64) << (3 * 4)
+                | (tiles[4] as u64) << (4 * 4)
+                | (tiles[5] as u64) << (5 * 4)
+                | (tiles[6] as u64) << (6 * 4)
+                | (tiles[7] as u64) << (7 * 4)
+                | (tiles[8] as u64) << (8 * 4)
+                | (tiles[9] as u64) << (9 * 4)
+                | (tiles[10] as u64) << (10 * 4)
+                | (tiles[11] as u64) << (11 * 4)
+                | (tiles[12] as u64) << (12 * 4)
+                | (tiles[13] as u64) << (13 * 4)
+                | (tiles[14] as u64) << (14 * 4)
+                | (tiles[15] as u64) << (15 * 4),
         }
     }
 
@@ -238,144 +228,52 @@ impl Board {
         BoardTiles(self.board)
     }
 
-    pub fn iter_moves(self) -> BoardMoves {
-        BoardMoves { board: self, i: 0 }
+    pub fn iter_moves(self, t: &BoardTable) -> impl Iterator<Item = Board> {
+        BoardMovesTable {
+            board: self,
+            boards: [
+                t.gravity1(self),
+                t.gravity2(self),
+                t.gravity3(self),
+                t.gravity4(self),
+            ],
+            i: 0,
+        }
     }
 
-    pub fn iter_moves_table(self, t: &BoardTable) -> BoardMovesTable {
-        // assert_eq!(BoardMovesTable { board: self, i: 0, t }.collect::<Vec<_>>(), self.iter_moves().collect::<Vec<_>>());
-        BoardMovesTable { board: self, i: 0, t }
-    }
-
-    pub fn iter_growth(&self) -> impl Iterator<Item=BoardGrowth> + '_ {
-        self.tiles().iter().enumerate().filter_map(move |(i, v)| if v != 0 { None } else { Some(BoardGrowth{ board: *self, i: i as u8 }) })
-    }
-
-    fn gravity1(self) -> Self {
-        let [a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p] = self.tiles().as_array();
-        let (a, b, c, d) = gravity4(a, b, c, d);
-        let (e, f, g, h) = gravity4(e, f, g, h);
-        let (i, j, k, l) = gravity4(i, j, k, l);
-        let (m, n, o, p) = gravity4(m, n, o, p);
-        Board::from_array(
-            [a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p]
-        )
-    }
-
-    fn gravity2(self) -> Self {
-        let [a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p] = self.tiles().as_array();
-        let (d, c, b, a) = gravity4(d, c, b, a);
-        let (h, g, f, e) = gravity4(h, g, f, e);
-        let (l, k, j, i) = gravity4(l, k, j, i);
-        let (p, o, n, m) = gravity4(p, o, n, m);
-        Board::from_array(
-            [a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p]
-        )
-    }
-
-    fn gravity3(self) -> Self {
-        let [a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p] = self.tiles().as_array();
-        let (a, e, i, m) = gravity4(a, e, i, m);
-        let (b, f, j, n) = gravity4(b, f, j, n);
-        let (c, g, k, o) = gravity4(c, g, k, o);
-        let (d, h, l, p) = gravity4(d, h, l, p);
-        Board::from_array(
-            [a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p]
-        )
-    }
-
-    fn gravity4(self) -> Self {
-        let [a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p] = self.tiles().as_array();
-        let (m, i, e, a) = gravity4(m, i, e, a);
-        let (n, j, f, b) = gravity4(n, j, f, b);
-        let (o, k, g, c) = gravity4(o, k, g, c);
-        let (p, l, h, d) = gravity4(p, l, h, d);
-        Board::from_array(
-            [a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p]
-        )
+    pub fn iter_growth(self) -> impl Iterator<Item = BoardGrowth> {
+        self.tiles().iter().enumerate().filter_map(move |(i, v)| {
+            if v != 0 {
+                None
+            } else {
+                Some(BoardGrowth {
+                    board: self,
+                    i: i as u8,
+                })
+            }
+        })
     }
 }
 
-pub struct BoardMoves {
+struct BoardMovesTable {
     board: Board,
-    i: u8,
+    boards: [Board; 4],
+    i: usize,
 }
 
-impl Iterator for BoardMoves {
+impl Iterator for BoardMovesTable {
     type Item = Board;
 
     fn next(&mut self) -> Option<Board> {
-        if self.i == 0 {
+        while self.i < self.boards.len() && self.boards[self.i] == self.board {
             self.i += 1;
-            let b = self.board.gravity1();
-            if self.board != b {
-                return Some(b);
-            }
         }
-        if self.i == 1 {
-            self.i += 1;
-            let b = self.board.gravity2();
-            if self.board != b {
-                return Some(b);
-            }
+        if self.i == self.boards.len() {
+            return None;
         }
-        if self.i == 2 {
-            self.i += 1;
-            let b = self.board.gravity3();
-            if self.board != b {
-                return Some(b);
-            }
-        }
-        if self.i == 3 {
-            self.i += 1;
-            let b = self.board.gravity4();
-            if self.board != b {
-                return Some(b);
-            }
-        }
-        None
-    }
-}
-
-pub struct BoardMovesTable<'a> {
-    board: Board,
-    i: u8,
-    t: &'a BoardTable,
-}
-
-impl<'a> Iterator for BoardMovesTable<'a> {
-    type Item = Board;
-
-    fn next(&mut self) -> Option<Board> {
-        if self.i == 0 {
-            self.i += 1;
-            let b = self.t.gravity1(self.board);
-            if self.board != b {
-                return Some(b);
-            }
-        }
-        if self.i == 1 {
-            self.i += 1;
-            let b = self.t.gravity2(self.board);
-            if self.board != b {
-                return Some(b);
-            }
-        }
-        if self.i == 2 {
-            self.i += 1;
-            let b = self.t.gravity3(self.board);
-            if self.board != b {
-                return Some(b);
-            }
-        }
-        if self.i == 3 {
-            self.i += 1;
-            let b = self.t.gravity4(self.board);
-            if self.board != b {
-                return Some(b);
-            }
-        }
-        None
+        let res = Some(self.boards[self.i]);
+        self.i += 1;
+        res
     }
 }
 
